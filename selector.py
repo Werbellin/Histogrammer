@@ -477,7 +477,7 @@ class MyPySelector(ROOT.TPySelector):
 
             print self.fake_ratios
 
-
+        self.pu_weight_histo = None
         if self.isMC and self.pu_weight_name is not None :
             f = ROOT.TFile.Open('%s/%s'%(self.cwd, self.pu_weight_name), 'read')
             self.pu_weight_histo = f.Get('weights')
