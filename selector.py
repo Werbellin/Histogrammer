@@ -500,6 +500,7 @@ class MyPySelector(ROOT.TPySelector):
             total_weight = tree.xsec * curr_k_factor * (tree.overallEventWeight / float(self.sumOfWeights)) * self.lumi * 1000.
             if self.pu_weight_histo is not None :
                 pu_weight = self.pu_weight_histo.GetBinContent(self.pu_weight_histo.FindBin(tree.NTrueInt))         
+                print 'reweighing by ', pu_weight
                 total_weight *= pu_weight
         self.plots['n_events'].Fill(1)
 
