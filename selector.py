@@ -166,26 +166,34 @@ class MyPySelector(ROOT.TPySelector):
     plots = {}
     def __init__(self):
         #print self.__class__.__module__+": init"
-        with open('/home/llr/cms/pigard/background_estimates/parameters.pkl', 'read') as pkl:
+        with open('/tmp/curr_selector_params.pkl', 'read') as pkl:
+#        with open('/home/llr/cms/pigard/Moriond17_plots/Histogrammer/test.pkl', 'read') as pkl:
             args = pickle.load(pkl)
         #print 'Settings: ', args
+        self.cwd = args['cwd']
         self.outputName = args['outputName']
         self.selection = args['selection']
         self.mode = args['mode']
         self.isMC = args['isMC']
-    
+        if self.isMC and self.mode == 'BKG' :
+            print 'Switching to CRZLL mode for MC'
+            self.mode = 'CRZLL'   
+ 
         if self.isMC :
             self.sumOfWeights = args['sumOfWeights']
             self.lumi = args['lumi']
             self.k_factor_names = args['k_factors']
             #print self.k_factor_names
+            self.pu_weight_name = None
+            if 'pu_weight' in args :
+                self.pu_weight_name = args['pu_weight']
 
         self.REG_FR_TEff = None
         self.RSE_FR_TEff = None
         self.TLE_FR_TEff = None
         self.fake_ratios = {}
         self.pt_fr_max = 80.
-        self.sklearn_est = '/home/llr/cms/pigard/background_estimates/' + args['sklearn_est']
+        self.sklearn_est = '/home/llr/cms/pigard/bdt_trainings/' + args['sklearn_est']
         self.est = None
         if self.sklearn_est is not '' :
             self.est = joblib.load(self.sklearn_est)
@@ -201,10 +209,14 @@ class MyPySelector(ROOT.TPySelector):
         #if 'skip_odd_events' in args['options'] :
         #    self.skip_odd_events = True
 
+
+        if self.mode == 'BKG' :
+            self.fake_ratio_files = args['fake_ratio_files']
+
     def Begin(self):
         #print 'Ran Begin()'
         return
-
+    @try_except
     def SlaveBegin(self, tree):
         #print 'SlaveBegin'
         #print 'nevents: ', self.nevents
@@ -259,27 +271,40 @@ class MyPySelector(ROOT.TPySelector):
 
         kinematic_selections = ['', 'HZZ']
         regions = []
-        if self.mode == 'ZZ' :
-                regions += ['SR', 'HZZ', 'BLS']
+        regions = ['ZZ', 'HZZ', 'BLS', 'VBS', 'nVBS']
 
-        if self.mode == 'BKG' :
+        #if self.mode == 'ZZ' :
+        #        regions += ['SR', 'HZZ', 'BLS', 'VBS', 'nVBS']
+
+        if self.mode in ['CRZLL', 'BKG'] :
             #    for region in ['2P2F', '3P1F', '3P1F_from_2F'] :
             #        for kin_sel in ['', 'HZZ'] :
-            regions += [kin_sel + region for kin_sel in ['', 'HZZ_', 'BLS_'] for region in ['2P2F', '3P1F', '3P1F_from_2F']]
+            kin_selections = [k + cr if r == '' else r + '_' + cr for cr in ['2P2Fuw','3P1Fuw', '2P2Fw', '3P1Fw', '3P1F_from_2F'] for r in regions]
+            print 'kin', kin_selections 
+            regions +=  kin_selections #[kin_sel + region for kin_sel in ['', 'HZZ_', 'BLS_'] for region in ['2P2F', '3P1F', '3P1F_from_2F']]
 
 
 #        kinematic_selections = ['ZZ']
 #        print regions
-        if self.mode == 'ZZ' or self.mode == 'BKG' :
+        if self.mode in ['ZZ', 'CRZLL', 'BKG'] :
+#        if self.mode == 'ZZ' or self.mode == 'BKG' :
+
+            #if self.mode in ['CRZLL', 'BKG'] :
+            #    bins_ZZMass = 50
+            #else : 
+            bins_ZZMass = 100
             for region in regions :
-                for fs in ['4e','4m', '2e2m', '2m2e','all', 'unidentified'] :
+                for fs in ['4e','4m', '2e2m', '2m2e','all','mix', 'unidentified'] :
                     #self.plots['ZZMass_' + fs] = TH1F('ZZMass_' + fs, ';m_{4l} [GeV];Entries', 100, 0, 1000)
                     self.plots[region + '_Z1Mass_' + fs] = TH1F(region + '_Z1Mass_' + fs, ';m_{Z1} [GeV];Entries', 60, 60, 120)
+                    self.plots[region + '_Z2Mass_' + fs] = TH1F(region + '_Z2Mass_' + fs, ';m_{Z1} [GeV];Entries', 60, 60, 120)
+
                     if region.find('HZZ') == 0 :
                         self.plots[region + '_ZZMass_' + fs] = TH1F(region + '_ZZMass_' + fs, ';m_{4l} [GeV];Entries', 204, 70, 886)
                     else :
-                        self.plots[region + '_ZZMass_' + fs] = TH1F(region + '_ZZMass_' + fs, ';m_{4l} [GeV];Entries', 100, 0, 1000)
+                        self.plots[region + '_ZZMass_' + fs] = TH1F(region + '_ZZMass_' + fs, ';m_{4l} [GeV];Entries', bins_ZZMass, 0, 1000)
 
+                self.plots[region + '_Nvtx'] = TH1F(region + '_Nvtx', ';N_{vtx};Entries', 50, 0, 50)
 
                 self.plots[region + '_Njets_4p7'] = TH1F(region + '_Njets_4p7', ';N jets (|#eta_{j}| < 4.7);Entries', 5, 0, 5)
                 self.plots[region + '_Njets_4p7_cleaned'] = TH1F(region + '_Njets_4p7_cleaned', ';N jets (|#eta_{j}| < 4.7);Entries', 5, 0, 5)
@@ -300,7 +325,7 @@ class MyPySelector(ROOT.TPySelector):
      
                 self.plots[region + '_Z_1_zepp'] = TH1F(region + '_Z_1_zepp', ';z^{*}_{Z1};Entries', 12, -6, 6)
                 self.plots[region + '_Z_2_zepp'] = TH1F(region + '_Z_2_zepp', ';z^{*}_{Z2};Entries', 12, -6, 6)
-                self.plots[region + '_rel_pt_hard'] = TH1F(region + '_rel_pt_hard', ';p_{T}^{rel., hard};Entries', 20, 0, 1)
+                self.plots[region + '_rel_pt_hard'] = TH1F(region + '_rel_pt_hard', ';p_{T}^{rel., hard};Entries', 10, 0, 1)
                 self.plots[region + '_delta_rel'] = TH1F(region + '_delta_rel', ';p_{T}^{rel., jets};Entries', 25, 0, 1)
                 self.plots[region + '_ZZjj_MVA'] = TH1F(region + '_ZZjj_MVA', ';BDT score;Entries', 20, -1, 1)
                 self.plots[region + '_sklearn_MVA'] = TH1F(region + '_sklearn_MVA', ';BDT score;Entries', 20, -1, 1)
@@ -323,36 +348,37 @@ class MyPySelector(ROOT.TPySelector):
 #                self.plots[region + '_'] = TH1F(region + '_', ';cos #theta*;Entries', 100, -1, 1)0v$y
 
        
-        if self.mode == 'CRZLL' or self.mode == 'BKG' :
-            for fs in ['Zp2e', 'Zp2m', '4e','4m', '2e2m', '2m2e', 'all', 'unidentified'] :
-                self.plots['ZZMass_' + fs] = TH1F('ZZMass_' + fs, ';weights;Entries', 200, 0, 2000)
-                regions = ['2P2F', '3P1F', 'SS', 'none']
-                if self.selection == 'RSE' : 
-                    #print 'Adding regions'
-                    regions += ['2P2F_ss_lt4', '2P2F_ss_gt4', '2P2F_os_gt4', '2P2F_os_lt4']
-                    regions += ['3P1F_ss_lt4', '3P1F_ss_gt4', '3P1F_os_gt4', '3P1F_os_lt4']
+        #if self.mode == 'CRZLL' or self.mode == 'BKG' :
+        #    for fs in ['Zp2e', 'Zp2m', '4e','4m', '2e2m', '2m2e', 'all', 'unidentified'] :
+        #        self.plots['ZZMass_' + fs] = TH1F('ZZMass_' + fs, ';weights;Entries', 200, 0, 2000)
+        #        regions = ['2P2F', '3P1F', 'SS', 'none']
+        #        if self.selection == 'RSE' : 
+        #            #print 'Adding regions'
+        #            regions += ['2P2F_ss_lt4', '2P2F_ss_gt4', '2P2F_os_gt4', '2P2F_os_lt4']
+        #            regions += ['3P1F_ss_lt4', '3P1F_ss_gt4', '3P1F_os_gt4', '3P1F_os_lt4']
 
-                for sel in regions :
-                    #print 'Histo ', sel + '_ZZMass_' + fs
-                    #self.plots[sel + '_ZZMass_' + fs] = TH1F(sel + '_ZZMass_' + fs, ';M_{4l};Entries', 50, 0, 1000)
-                    self.plots[sel + '_fZMass_' + fs] = TH1F(sel + '_fZMass_' + fs, ';M_{Z};Entries', 75, 0, 150)
+        #        for sel in regions :
+        #            #print 'Histo ', sel + '_ZZMass_' + fs
+        #            self.plots[sel + '_ZZMass_' + fs] = TH1F(sel + '_ZZMass_' + fs, ';M_{4l};Entries', 50, 0, 1000)
+        #            self.plots[sel + '_fZMass_' + fs] = TH1F(sel + '_fZMass_' + fs, ';M_{Z};Entries', 75, 0, 150)
+        #            self.plots[sel + '_Z1Mass_' + fs] = TH1F(sel + '_Z1Mass_' + fs, ';M_{Z};Entries', 75, 0, 150)
 
-        if self.mode == 'BKG' :
-            #print 'Histos BKG'
-            for fs in ['4e','4m', '2e2m', '2m2e'] :
-                #self.plots['BKG_ZZMass_' + fs] = TH1F('BKG_ZZMass_' + fs, ';weights;Entries', 200, 0, 2000)
-                regions = ['2P2F', '3P1F', '3P1F_from_2F', 'SS']
-                if self.selection == 'RSE' : 
-                    #print 'Adding regions'
-                    regions += ['2P2F_ss_lt4', '2P2F_ss_gt4', '2P2F_os_gt4']
-                    regions += ['3P1F_ss_lt4', '3P1F_ss_gt4', '3P1F_os_gt4']
-                    regions += ['3P1F_ss_lt4_from_2F', '3P1F_ss_gt4_from_2F', '3P1F_os_gt4_from_2F']
+        #if self.mode == 'BKG' :
+        #    #print 'Histos BKG'
+        #    for fs in ['4e','4m', '2e2m', '2m2e'] :
+        #        #self.plots['BKG_ZZMass_' + fs] = TH1F('BKG_ZZMass_' + fs, ';weights;Entries', 200, 0, 2000)
+        #        regions = ['2P2F', '3P1F', '3P1F_from_2F', 'SS']
+        #        if self.selection == 'RSE' : 
+        #            #print 'Adding regions'
+        #            regions += ['2P2F_ss_lt4', '2P2F_ss_gt4', '2P2F_os_gt4']
+        #            regions += ['3P1F_ss_lt4', '3P1F_ss_gt4', '3P1F_os_gt4']
+        #            regions += ['3P1F_ss_lt4_from_2F', '3P1F_ss_gt4_from_2F', '3P1F_os_gt4_from_2F']
 
-                for sel in regions :
-                    #print 'Histo ', 'BKG_'  + sel + '_ZZMass_' + fs
-                    self.plots['BKG_'  + sel + '_ZZMass_' + fs] = TH1F('BKG_' + sel + '_ZZMass_' + fs, ';M_{4l};Entries', 50, 0, 1000)
-                    self.plots['BKG_'  + sel + '_ZZMass_FR_' + fs] = TH2F('BKG_' + sel + '_ZZMass_FR_' + fs, ';M_{4l};Entries', 50, 0, 1000, 1000, 0, .1)
-                    self.plots['BKG_'  + sel + '_ZZMass_FR_profile_' + fs] = TProfile('BKG_' + sel + '_ZZMass_FR_profile_' + fs, ';M_{4l};Entries', 50, 0, 1000, 0, 0.1)
+        #        for sel in regions :
+        #            #print 'Histo ', 'BKG_'  + sel + '_ZZMass_' + fs
+        #            self.plots['BKG_'  + sel + '_ZZMass_' + fs] = TH1F('BKG_' + sel + '_ZZMass_' + fs, ';M_{4l};Entries', 50, 0, 1000)
+        #            self.plots['BKG_'  + sel + '_ZZMass_FR_' + fs] = TH2F('BKG_' + sel + '_ZZMass_FR_' + fs, ';M_{4l};Entries', 50, 0, 1000, 1000, 0, .1)
+        #            self.plots['BKG_'  + sel + '_ZZMass_FR_profile_' + fs] = TProfile('BKG_' + sel + '_ZZMass_FR_profile_' + fs, ';M_{4l};Entries', 50, 0, 1000, 0, 0.1)
 
                     #self.plots[sel + '_fZMass_' + fs] = TH1F(sel + '_fZMass_' + fs, ';M_{Z};Entries', 75, 0, 150)
 
@@ -423,7 +449,8 @@ class MyPySelector(ROOT.TPySelector):
                         eff = f.Get('raw/Zpe_fakeRatio_from_REG')
                 else : 
                     if use_corrected[sel] : 
-                        f = ROOT.TFile.Open('/home/llr/cms/pigard/background_estimates/' + 'fake_ratios_v2.root')
+                        f = ROOT.TFile.Open('%s/%s.root'%(self.cwd, self.fake_ratio_files['fake_ratio_file']))
+                        #f = ROOT.TFile.Open('/home/llr/cms/pigard/background_estimates/' + 'fake_ratios_v2.root')
                         #print 'Selection ', sel
                         eff = f.Get(corrected_names[sel])
                         eff.SetDirectory(0)
@@ -450,6 +477,14 @@ class MyPySelector(ROOT.TPySelector):
 
             print self.fake_ratios
 
+
+        if self.isMC and self.pu_weight_name is not None :
+            f = ROOT.TFile.Open('%s/%s'%(self.cwd, self.pu_weight_name), 'read')
+            self.pu_weight_histo = f.Get('weights')
+            self.pu_weight_histo.SetDirectory(0)
+            self.pu_weight_histo.Scale(1./self.pu_weight_histo.Integral())    
+
+
     @try_except
     def Process(self, entry):
         #print 'in Process!!!'
@@ -459,17 +494,19 @@ class MyPySelector(ROOT.TPySelector):
         tree = self.fChain
         
         total_weight = 1.0
+        curr_k_factor = 1.0
         if self.isMC :
-            k_factor = get_k_factors(tree, self.k_factor_names)
-            total_weight = tree.xsec * k_factor * (tree.overallEventWeight / float(self.sumOfWeights)) * self.lumi * 1000.
-         
-
+            curr_k_factor = get_k_factors(tree, self.k_factor_names)
+            total_weight = tree.xsec * curr_k_factor * (tree.overallEventWeight / float(self.sumOfWeights)) * self.lumi * 1000.
+            if self.pu_weight_histo is not None :
+                pu_weight = self.pu_weight_histo.GetBinContent(self.pu_weight_histo.FindBin(tree.NTrueInt))         
+                total_weight *= pu_weight
         self.plots['n_events'].Fill(1)
 
         final_state = 'unidentified'
         regions = {}
 
-        if self.mode == 'ZZ' or self.mode == 'CRZLL' or self.mode == 'BKG' :
+        if True : #self.mode == 'ZZ' or self.mode == 'CRZLL' or self.mode == 'BKG' :
             final_state_id = abs(tree.Z1Flav*tree.Z2Flav)
             if(final_state_id == 121*242 or final_state_id == 121*121) : final_state = "4e"
             if(final_state_id == 169*242 or final_state_id == 169*121) : final_state = "2e2m"
@@ -479,8 +516,12 @@ class MyPySelector(ROOT.TPySelector):
             #self.plots['ZZMass_' + final_state].Fill(tree.ZZMass, total_weight) 
 
             pass_SR = False
-            pass_ZZsel = tree.ZZsel >=120
-            pass_BLSsel = tree.ZZsel >=120 and tree.DiJetMass > 100.
+            low_Z_mass = 60
+            up_Z_mass = 120
+            pass_ZZsel = (low_Z_mass <= tree.Z1Mass <= up_Z_mass) and (low_Z_mass <= tree.Z2Mass <= up_Z_mass) # tree.ZZsel >=120
+            pass_BLSsel = pass_ZZsel and tree.DiJetMass > 100.
+            pass_VBSsel = pass_BLSsel and tree.DiJetMass > 400. and abs(tree.DiJetDEta) > 2.4
+
             pass_HZZsel = tree.ZZsel >= 90
             pass_REG = True
             pass_TLE = False
@@ -494,21 +535,28 @@ class MyPySelector(ROOT.TPySelector):
  
 
             pass_SR = (self.selection == 'REG' and pass_REG) or (self.selection == 'RSE' and pass_RSE) or (self.selection == 'TLE' and pass_TLE)
- 
+            print pass_ZZsel 
             pass_selection = False
 
-            if self.mode == 'ZZ' :
+            #if self.mode == 'ZZ' :
 
-                pass_selection = pass_SR and pass_ZZsel
-                if pass_selection : 
-                    regions['SR'] = total_weight
-                if pass_SR and pass_HZZsel :
-                    regions['HZZ'] = total_weight
-                if pass_SR and pass_BLSsel :
-                    regions['BLS'] = total_weight
+            pass_selection = pass_SR and pass_ZZsel
+            if pass_selection : 
+                regions['ZZ'] = total_weight
+            if pass_SR and pass_HZZsel :
+                regions['HZZ'] = total_weight
+            if pass_SR and pass_BLSsel :
+                regions['BLS'] = total_weight / curr_k_factor
+            if pass_SR and pass_VBSsel :
+                regions['VBS'] = total_weight / curr_k_factor
+            if pass_SR and pass_BLSsel and not pass_VBSsel:
+                regions['nVBS'] = total_weight / curr_k_factor 
+
+            print 'regions1 ', regions
 
 
-            if self.mode == 'BKG' :
+            control_regions = {}
+            if self.mode in  ['CRZLL', 'BKG'] :
                 CRZLLss = 21
                 CRZLLos_2P2F = 22
                 CRZLLos_3P1F = 23
@@ -599,8 +647,23 @@ class MyPySelector(ROOT.TPySelector):
                 skip_CR = False
                 if self.selection == 'RSE' :
                     if (not pass_ss) and (not pass_SIP_gt_4) : skip_CR = True 
+                
+                if pass_2P2F and not skip_CR :
+                    control_regions['2P2Fuw'] = 1.0# .append('2P2Fuw')
+#                    regions['HZZ_2P2F'] = total_weight
+#                    if passfZMass :
+#                        regions['2P2F'] = total_weight
 
+                if pass_3P1F and not skip_CR :
+                    control_regions['3P1Fuw'] = 1.0
+                    #regions['HZZ_3P1F'] = total_weight
+#                    if passfZMass :
+#                        regions['3P1F'] = total_weight
 
+                
+                   
+
+            if self.mode == 'BKG' :
                 #print 'RUNNING BKG MODE'
                 if pass_2P2F or pass_3P1F :
                     weight_1 = 1.
@@ -630,25 +693,45 @@ class MyPySelector(ROOT.TPySelector):
                         #print 'Fake ratio: ', fr_2
 
                     if pass_2P2F and not skip_CR :
-                        regions['HZZ_2P2F'] = total_weight * fr_1 / (1. - fr_1) * fr_2 / (1. - fr_2)
-                        regions['HZZ_3P1F_from_2F'] = total_weight * (fr_1 / (1. - fr_1) + fr_2 / (1. - fr_2)) 
-                        if passfZMass :
-                            regions['2P2F'] = total_weight * fr_1 / (1. - fr_1) * fr_2 / (1. - fr_2)
-                            regions['3P1F_from_2F'] = total_weight * (fr_1 / (1. - fr_1) + fr_2 / (1. - fr_2)) 
+                        control_regions['2P2Fw'] = fr_1 / (1. - fr_1) * fr_2 / (1. - fr_2)
+                        control_regions['3P1F_from_2F'] = (fr_1 / (1. - fr_1) + fr_2 / (1. - fr_2))
+#                        regions['HZZ_2P2F'] = total_weight * fr_1 / (1. - fr_1) * fr_2 / (1. - fr_2)
+
+#                        regions['HZZ_3P1F_from_2F'] = total_weight * (fr_1 / (1. - fr_1) + fr_2 / (1. - fr_2)) 
+#                        if passfZMass :
+#                            regions['2P2F'] = total_weight * fr_1 / (1. - fr_1) * fr_2 / (1. - fr_2)
+#                            regions['3P1F_from_2F'] = total_weight * (fr_1 / (1. - fr_1) + fr_2 / (1. - fr_2)) 
  
                     if pass_3P1F and not skip_CR :
-                        regions['HZZ_3P1F'] = total_weight * fr_1 / (1. - fr_1)
-                        if passfZMass :
-                            regions['3P1F'] = total_weight * fr_1 / (1. - fr_1)
+                        control_regions['3P1Fw'] = fr_1 / (1. - fr_1)
+#                        regions['HZZ_3P1F'] = total_weight * fr_1 / (1. - fr_1)
+#                        if passfZMass :
+#                            regions['3P1F'] = total_weight * fr_1 / (1. - fr_1)
 
-#            print regions
-            for region, final_weight in regions.iteritems() :                
+            print 'regions', regions
+            to_plot = dict(regions)
+            print 'selection ', regions
+            if self.mode in ['BKG', 'CRZLL'] :
+                print 'control_region ', control_regions 
+                for selection in regions :
+                    for cr in control_regions :
+                        to_plot[selection + '_' + cr] = regions[selection] * control_regions[cr]
+            print to_plot
+
+            for region, final_weight in to_plot.iteritems() :                
+#                print 'Filling ', region + '_ZZMass_' + final_state
+                print region[:3]
+                if region[:3] in  ['VBS'] and not self.isMC : continue
                 self.plots[region + '_ZZMass_' + final_state].Fill(tree.ZZMass, final_weight) 
                 self.plots[region + '_ZZMass_all'].Fill(tree.ZZMass, final_weight) 
                 self.plots[region + '_Z1Mass_' + final_state].Fill(tree.Z1Mass, final_weight) 
                 self.plots[region + '_Z1Mass_all'].Fill(tree.Z1Mass, final_weight) 
+                self.plots[region + '_Z2Mass_' + final_state].Fill(tree.Z2Mass, final_weight) 
+                self.plots[region + '_Z2Mass_all'].Fill(tree.Z2Mass, final_weight) 
 
 
+
+                self.plots[region + '_Nvtx'].Fill(tree.Nvtx, final_weight) 
                 self.plots[region + '_costhetastar'].Fill(tree.costhetastar, final_weight) 
                 self.plots[region + '_helphi'].Fill(tree.helphi, final_weight)
                 self.plots[region + '_helcosthetaZ1'].Fill(tree.helcosthetaZ1, final_weight)
@@ -710,9 +793,13 @@ class MyPySelector(ROOT.TPySelector):
                         self.plots[region + '_DiJetDEta_4p7'].Fill(abs(tree.DiJetDEta), final_weight)
 #                    self.plots[region + '_DiJetMass_PFMET'].Fill(tree.DiJetMass, tree.PFMET, final_weight)
 
-                    if self.isMC or self.mode != 'ZZ' or tree.ZZjj_MVA < -0.05  :
-                        self.plots[region + '_ZZjj_MVA'].Fill(tree.ZZjj_MVA, final_weight)
-                        self.plots[region + '_ZZjj_MVA_fine'].Fill(tree.ZZjj_MVA, final_weight)
+                    #if self.isMC or self.mode != 'ZZ' or tree.ZZjj_MVA < -0.05  :
+                    #    self.plots[region + '_ZZjj_MVA'].Fill(tree.ZZjj_MVA, final_weight)
+                    #    self.plots[region + '_ZZjj_MVA_fine'].Fill(tree.ZZjj_MVA, final_weight)
+                    #if tree.ZZjj_MVA < -0.05  :
+                    #    self.plots[region + '_ZZjj_MVA_blind'].Fill(tree.ZZjj_MVA, final_weight)
+
+
                     sklearn_score = -1.
                     if self.est is not None :
                         X_test = np.array([tree.DiJetMass, abs(tree.DiJetDEta), tree.ZZMass, Z1_zepp, Z2_zepp, rel_pt_hard, tj_delta_rel])
@@ -724,7 +811,7 @@ class MyPySelector(ROOT.TPySelector):
                         sklearn_proba = self.est.predict_proba(X_test)[:, 1]
 
                         sklearn_score = 2.0/(1.0+np.exp(-2.0*sklearn_score))-1
-                    if self.isMC or self.mode != 'ZZ' or sklearn_score < -0.2 :
+                    if self.isMC or self.mode in ['CRZLL', 'BKG'] or sklearn_score < 0.5 :
                         self.plots[region + '_sklearn_MVA'].Fill(sklearn_score, final_weight)
                         self.plots[region + '_sklearn_MVA_fine'].Fill(sklearn_score, final_weight)
                         self.plots[region + '_sklearn_MVA_SR'].Fill(sklearn_score, final_weight)
@@ -743,9 +830,6 @@ class MyPySelector(ROOT.TPySelector):
                         self.tj_delta_rel[0] = tj_delta_rel
                         self.tj1_eta_x_tj2_eta[0] =  tree.JetEta[tj_leading] * tree.JetEta[tj_subleading]
                         self.out_tree.Fill()
-                    if tree.ZZjj_MVA < -0.05  :
-                        self.plots[region + '_ZZjj_MVA_blind'].Fill(tree.ZZjj_MVA, final_weight)
-
 
                 #if self.mode == 'BKG' :
                 #    if pass_2P2F and not skip_CR :
@@ -920,12 +1004,12 @@ class MyPySelector(ROOT.TPySelector):
 
 
         selections = []
-        if self.mode == 'CRZLL' or self.mode == 'BKG' :
-            selections = ['2P2F', '3P1F']
-        if self.mode == 'BKG' :
-            selections += ['BKG']
-        if self.mode == 'ZZ' :
-            selections += ['BLS', 'SR','HZZ']
+        #if self.mode == 'CRZLL' or self.mode == 'BKG' :
+        #    selections = ['2P2F', '3P1F']
+        #if self.mode == 'BKG' :
+        #    selections += ['BKG']
+        #if self.mode == 'ZZ' :
+        selections += ['BLS', 'ZZ','HZZ', 'VBS', 'nVBS']
         for sel in selections :
             f.mkdir(sel)
 
